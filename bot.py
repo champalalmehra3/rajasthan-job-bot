@@ -3,60 +3,56 @@ from bs4 import BeautifulSoup
 import os
 import json
 
+# उन वेबसाइट्स की लिस्ट जिन्हें चेक करना है
 URLS = [
-    "https://rpsc.rajasthan.gov.in/syllabus",
-    "https://rpsc.rajasthan.gov.in/results",
-    "https://rpsc.rajasthan.gov.in/advertisements",
     "https://rpsc.rajasthan.gov.in/news",
     "https://rssb.rajasthan.gov.in/news",
-    "https://rssb.rajasthan.gov.in/results",
-    "https://rssb.rajasthan.gov.in/answerkeys",
-    "https://rssb.rajasthan.gov.in/advertisements",
-    "https://rssb.rajasthan.gov.in/oldpapers",
-    "https://rssb.rajasthan.gov.in/examscheme"
+    "https://rpsc.rajasthan.gov.in/results",
+    "https://rssb.rajasthan.gov.in/results"
 ]
 
 TOKEN = os.environ['BOT_TOKEN']
 CHAT_ID = os.environ['CHAT_ID']
 DATA_FILE = "last_updates.json"
 
-def send_telegram_msg(text):
+def send_msg(text):
     url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
     payload = {"chat_id": CHAT_ID, "text": text, "parse_mode": "HTML"}
-    requests.post(url, data=payload)
+    return requests.post(url, data=payload)
 
-def get_latest_info(url):
+def get_updates(url):
     try:
         headers = {'User-Agent': 'Mozilla/5.0'}
-        response = requests.get(url, headers=headers, timeout=20)
-        soup = BeautifulSoup(response.text, 'html.parser')
-        links = soup.find_all('a', href=True)
-        for link in links:
-            href = link['href']
-            text = link.get_text(strip=True)
-            if len(text) > 10 and ('.pdf' in href.lower() or 'javascript:void' not in href.lower()):
-                full_url = href if href.startswith('http') else f"{url.split('.in')[0]}.in{href}"
-                return {"text": text, "url": full_url}
+        r = requests.get(url, headers=headers, timeout=15)
+        soup = BeautifulSoup(r.text, 'html.parser')
+        # ताज़ा लिंक ढूंढना
+        first_link = soup.find('a', href=True)
+        if first_link:
+            return {"text": first_link.get_text(strip=True), "link": first_link['href']}
     except: return None
     return None
 
 def main():
+    # पुरानी याददाश्त लोड करना
     if os.path.exists(DATA_FILE):
         with open(DATA_FILE, "r") as f: history = json.load(f)
     else: history = {}
-    new_history = {}
+
     for url in URLS:
-        info = get_latest_info(url)
-        if info:
-            current_link = info['url']
-            if history.get(url) != current_link:
-                page_name = url.split('/')[-1].capitalize()
-                site_name = "RPSC" if "rpsc" in url else "RSSB"
-                msg = f"<b>🔔 {site_name} नयी अपडेट ({page_name})</b>\n\n📝 {info['text']}\n\n🔗 <a href='{current_link}'>यहाँ क्लिक करें</a>\n\n📢 @raj_education_news"
-                send_telegram_msg(msg)
-            new_history[url] = current_link
-    with open(DATA_FILE, "w") as f: json.dump(new_history, f)
+        data = get_updates(url)
+        if data and data['link'] != history.get(url):
+            # नया मैसेज भेजना
+            site = "RPSC" if "rpsc" in url else "RSSB"
+            msg = f"<b>🔔 {site} नयी अपडेट</b>\n\n📝 {data['text']}\n\n📢 @raj_education_news"
+            res = send_msg(msg)
+            
+            # अगर मैसेज चला गया, तो रिकॉर्ड अपडेट करें
+            if res.status_code == 200:
+                history[url] = data['link']
+    
+    # नया रिकॉर्ड सेव करना
+    with open(DATA_FILE, "w") as f: json.dump(history, f)
 
 if __name__ == "__main__":
     main()
-  
+    
